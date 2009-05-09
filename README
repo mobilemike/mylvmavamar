@@ -1,0 +1,3 @@
+h2. mylvmavamar
+
+Script to automatically mount and LVM snapshot of InnoDB tables prior to backup by EMC Avamar
