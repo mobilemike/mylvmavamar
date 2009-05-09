@@ -1,0 +1,66 @@
+#!/usr/bin/ruby
+#
+# mylvmavamar - utility for creating MySQL backups via LVM snapshots and 
+#               EMC's Avamar
+# 
+# Inspiration and code snippets taken from mylvmbackup
+# (www.lenzg.net/mylvmbackup/)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+require 'logger'
+
+log_dir = "/var/log/mylvmavamar.log"
+
+lvcreate_cmd = "/usr/sbin/lvcreate"
+lvs_cmd = "/usr/sbin/lvs"
+lvremove_cmd = "/usr/sbin/lvremove"
+mount_cmd = "/bin/mount"
+umount_cmd = "/bin/umount"
+mysqld_safe_cmd = "/usr/bin/mysqld_safe"
+
+vg = "vg1"
+snap_lv = "lv_snap"
+data_lv = "lv4_sqldata"
+lv_extents = 2559
+mount_dir = "/mnt/mylvmavamar"
+pid_file = "/var/run/mylvmavamar.pid"
+
+unless ARGV.first == "pre" || ARGV.first == "post"
+  puts "  Usage: mylvmavamar {pre|post}\n"
+  exit
+end
+
+logger = Logger.new(log_dir, 5, 512000)
+
+logger.debug "Starting..."
+case ARGV.first
+  when "pre"
+    logger.debug " -- Start of pre script --"
+    logger.debug "Running LVM snap..."
+    logger.info %x[#{lvcreate_cmd} -s --extents=#{lv_extents} --name=#{snap_lv} /dev/#{vg}/#{data_lv}]
+    logger.debug "Mounting LVM snap..."
+    logger.info %x[#{mount_cmd} -o rw /dev/#{vg}/#{snap_lv} #{mount_dir}]
+    logger.debug "Recovering InnoDB..."
+    logger.info %x[echo 'select 1;' | #{mysqld_safe_cmd} --socket=/tmp/mylvmavamar.sock --pid-file=#{pid_file} --datadir=#{mount_dir} --skip-networking --skip-grant --bootstrap --skip-ndbcluster --skip-slave-start]
+    logger.debug "-- End of pre script --"
+  when "post"
+    logger.debug " -- Start of post script --"
+    logger.info "LVM Usage stats:"
+    logger.info %x[#{lvs_cmd} /dev/#{vg}/#{snap_lv}]
+    logger.debug "Unmounting snap..."
+    logger.info %x[#{umount_cmd} #{mount_dir}]
+    logger.debug %x[#{lvremove_cmd} -f /dev/#{vg}/#{snap_lv}]
+    logger.debug "-- End of post script --"
+end
